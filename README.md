@@ -1,6 +1,6 @@
 ## 📈 Current Status
 
-- [x] Phase 0: Setup & Data Acquisition ✅
+- [x] Phase 0: Setup & Data Acquisition 
   - [x] Project structure created
   - [x] Kaggle API configured
   - [x] Dataset downloaded (7.7M records, 2.9GB)
