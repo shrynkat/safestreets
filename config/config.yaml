@@ -1,0 +1,43 @@
+# SafeStreets Configuration
+
+project:
+  name: "SafeStreets"
+  version: "0.1.0"
+  description: "Traffic accident analysis and risk prediction platform"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  external_dir: "data/external"
+  
+  sources:
+    kaggle_accidents:
+      dataset: "sobhanmoosavi/us-accidents"
+      filename: "US_Accidents_March23.csv"
+      
+database:
+  type: "duckdb"  # We'll use DuckDB for local development
+  path: "data/safestreets.duckdb"
+  
+ingestion:
+  batch_size: 100000
+  file_format: "parquet"
+  compression: "snappy"
+  
+processing:
+  severity_levels: [1, 2, 3, 4]
+  required_columns:
+    - "ID"
+    - "Severity"
+    - "Start_Time"
+    - "Start_Lat"
+    - "Start_Lng"
+    - "State"
+    
+cloud:
+  aws:
+    region: "us-east-1"
+    s3_bucket: ""  # Fill in later when we set up AWS
+  gcp:
+    project_id: ""
+    bucket_name: ""  # Fill in later if using GCP
