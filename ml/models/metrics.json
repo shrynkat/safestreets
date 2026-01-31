@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-01-30T17:57:24.434344",
+  "model_type": "XGBClassifier",
+  "metrics": {
+    "accuracy": 0.7594759325836736,
+    "precision": 0.43611681250225054,
+    "recall": 0.8052551619133737,
+    "f1_score": 0.5658019057985656,
+    "roc_auc": 0.8568688757658335,
+    "test_samples": 1545679,
+    "positive_samples": 300809,
+    "negative_samples": 1244870,
+    "predicted_positive": 555420,
+    "predicted_negative": 990259
+  }
+}
