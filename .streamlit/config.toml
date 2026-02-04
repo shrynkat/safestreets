@@ -1,0 +1,82 @@
+# SafeStreets Streamlit Configuration
+# Professional dark theme inspired by modern dashboards
+
+[theme]
+# Primary accent color for interactive elements
+primaryColor = "#00D9FF"
+
+# Background color for the main content area
+backgroundColor = "#0A0A0F"
+
+# Background color for sidebar and secondary areas
+secondaryBackgroundColor = "#12121A"
+
+# Color for text and other content
+textColor = "#FAFAFA"
+
+# Font family
+font = "sans serif"
+
+[server]
+# Enable headless mode for deployment
+headless = true
+
+# Enable CORS for API communication
+enableCORS = true
+
+# Enable XSRF protection
+enableXsrfProtection = true
+
+# Max upload size (MB)
+maxUploadSize = 200
+
+# Max message size (MB)
+maxMessageSize = 200
+
+# File watcher type
+fileWatcherType = "auto"
+
+[browser]
+# Disable usage stats collection
+gatherUsageStats = false
+
+# Server address to open in browser
+serverAddress = "localhost"
+
+# Server port
+serverPort = 8501
+
+[runner]
+# Enable magic commands
+magicEnabled = true
+
+# Enable fast reruns for better performance
+fastReruns = true
+
+# Post script GC
+postScriptGC = true
+
+# Allow running scripts in symlinked directories
+allowRunOnSave = false
+
+[client]
+# Show error details in the browser
+showErrorDetails = false
+
+# Toolbar mode: auto, developer, viewer, minimal
+toolbarMode = "minimal"
+
+# Enable wide mode by default
+# Note: This is overridden by layout="wide" in set_page_config
+
+[logger]
+# Log level: error, warning, info, debug
+level = "warning"
+
+# Log message format
+messageFormat = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+[deprecation]
+# Show deprecation warnings
+showfileUploaderEncoding = false
+showPyplotGlobalUse = false
