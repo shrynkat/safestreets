@@ -183,3 +183,165 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="Error message")
     details: Optional[dict] = Field(None, description="Additional error details")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# Route Analysis Models
+# =============================================================================
+
+class RouteAnalysisRequest(BaseModel):
+    """
+    Request body for route analysis endpoint.
+
+    Analyzes multiple route alternatives between origin and destination,
+    scoring each for accident risk based on conditions.
+    """
+    origin: str = Field(
+        ...,
+        min_length=1,
+        description="Starting location (address, place name, or 'lat,lng')"
+    )
+    destination: str = Field(
+        ...,
+        min_length=1,
+        description="Ending location (address, place name, or 'lat,lng')"
+    )
+    departure_time: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Departure time in ISO format (e.g., '2024-02-01T17:00:00')"
+    )
+    weather_condition: str = Field(
+        default="Clear",
+        description="Current weather condition (e.g., 'Clear', 'Rain', 'Snow', 'Fog')"
+    )
+    temperature_f: float = Field(
+        default=70.0,
+        description="Temperature in Fahrenheit"
+    )
+    visibility_mi: float = Field(
+        default=10.0,
+        ge=0,
+        description="Visibility in miles"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "origin": "Tempe, AZ",
+                    "destination": "Sedona, AZ",
+                    "departure_time": "2024-02-01T17:00:00",
+                    "weather_condition": "Clear",
+                    "temperature_f": 70.0,
+                    "visibility_mi": 10.0
+                }
+            ]
+        }
+    }
+
+
+class DangerZone(BaseModel):
+    """A high-risk segment along a route."""
+    segment: int = Field(..., description="Segment index along the route")
+    risk: float = Field(..., ge=0, le=1, description="Risk score for this segment")
+    location: str = Field(..., description="Location as '(lat, lon)' string")
+    risk_level: str = Field(..., description="Risk level classification")
+
+
+class RouteDetails(BaseModel):
+    """Detailed information about a single route alternative."""
+    route_id: int = Field(..., description="Route identifier (1-indexed)")
+    summary: str = Field(..., description="Route name/description (e.g., 'I-17 N')")
+    distance_text: str = Field(..., description="Human-readable distance (e.g., '126 mi')")
+    distance_meters: int = Field(..., description="Distance in meters")
+    duration_text: str = Field(..., description="Human-readable duration (e.g., '2 hours 4 mins')")
+    duration_seconds: int = Field(..., description="Duration in seconds")
+    risk_score: float = Field(..., ge=0, le=1, description="Overall risk score (0-1)")
+    risk_level: str = Field(..., description="Risk classification (LOW/MEDIUM/HIGH)")
+    safety_score: float = Field(..., ge=0, le=100, description="Safety score (0-100, higher is safer)")
+    max_risk: float = Field(..., ge=0, le=1, description="Highest risk segment score")
+    min_risk: float = Field(..., ge=0, le=1, description="Lowest risk segment score")
+    segments_analyzed: int = Field(..., description="Number of segments scored")
+    danger_zones: list[DangerZone] = Field(
+        default_factory=list,
+        description="List of high-risk segments (risk > 0.6)"
+    )
+    recommendation: Optional[str] = Field(
+        None,
+        description="Recommendation text if this is the safest route"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "route_id": 1,
+                    "summary": "I-17 N",
+                    "distance_text": "126 mi",
+                    "distance_meters": 202777,
+                    "duration_text": "2 hours 4 mins",
+                    "duration_seconds": 7440,
+                    "risk_score": 0.489,
+                    "risk_level": "MEDIUM",
+                    "safety_score": 51.1,
+                    "max_risk": 0.577,
+                    "min_risk": 0.410,
+                    "segments_analyzed": 98,
+                    "danger_zones": [],
+                    "recommendation": "Recommended - Safest option"
+                }
+            ]
+        }
+    }
+
+
+class RouteAnalysisResponse(BaseModel):
+    """Response containing analyzed routes sorted by safety."""
+    routes: list[RouteDetails] = Field(
+        ...,
+        description="List of route alternatives sorted by safety score (safest first)"
+    )
+    total_routes: int = Field(..., description="Total number of routes analyzed")
+    origin: str = Field(..., description="Origin location")
+    destination: str = Field(..., description="Destination location")
+    weather_condition: str = Field(..., description="Weather condition used for analysis")
+    temperature_f: float = Field(..., description="Temperature used for analysis")
+    visibility_mi: float = Field(..., description="Visibility used for analysis")
+    analysis_timestamp: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="When the analysis was performed"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "routes": [
+                        {
+                            "route_id": 1,
+                            "summary": "I-17 N",
+                            "distance_text": "126 mi",
+                            "distance_meters": 202777,
+                            "duration_text": "2 hours 4 mins",
+                            "duration_seconds": 7440,
+                            "risk_score": 0.489,
+                            "risk_level": "MEDIUM",
+                            "safety_score": 51.1,
+                            "max_risk": 0.577,
+                            "min_risk": 0.410,
+                            "segments_analyzed": 98,
+                            "danger_zones": [],
+                            "recommendation": "Recommended - Safest option"
+                        }
+                    ],
+                    "total_routes": 1,
+                    "origin": "Tempe, AZ",
+                    "destination": "Sedona, AZ",
+                    "weather_condition": "Clear",
+                    "temperature_f": 70.0,
+                    "visibility_mi": 10.0,
+                    "analysis_timestamp": "2024-02-01T17:00:00Z"
+                }
+            ]
+        }
+    }

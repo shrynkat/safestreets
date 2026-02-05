@@ -6,6 +6,7 @@ FastAPI application for serving accident risk predictions using the trained XGBo
 Endpoints:
 - POST /predict: Single prediction
 - POST /predict/batch: Batch predictions
+- POST /analyze-route: Analyze route alternatives for safety
 - GET /health: Health check
 - GET /model/info: Model metadata
 """
@@ -31,12 +32,20 @@ from api.models import (
     BatchPredictionRequest,
     BatchPredictionResponse,
     ContributingFactor,
+    DangerZone,
     ErrorResponse,
     HealthResponse,
     ModelInfoResponse,
     PredictionResponse,
     RiskLevel,
+    RouteAnalysisRequest,
+    RouteAnalysisResponse,
+    RouteDetails,
 )
+
+# Import routing modules
+from routing.directions_api import get_routes
+from routing.risk_scorer import score_entire_route
 
 # Configure logging
 logging.basicConfig(
@@ -517,6 +526,222 @@ async def model_info() -> ModelInfoResponse:
         feature_names=app_state["feature_names"] or [],
         performance_metrics=app_state["metrics"] or {}
     )
+
+
+def get_route_risk_level(risk_score: float) -> str:
+    """Convert risk score to risk level string."""
+    if risk_score < 0.3:
+        return "LOW"
+    elif risk_score < 0.5:
+        return "MEDIUM"
+    elif risk_score < 0.7:
+        return "HIGH"
+    else:
+        return "CRITICAL"
+
+
+@app.post(
+    "/analyze-route",
+    response_model=RouteAnalysisResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        503: {"model": ErrorResponse, "description": "Service unavailable"},
+        500: {"model": ErrorResponse, "description": "Internal error"}
+    },
+    summary="Analyze Route Safety",
+    description="""
+    Analyze multiple route alternatives between origin and destination for accident risk.
+
+    This endpoint:
+    1. Fetches route alternatives from Google Maps Directions API
+    2. Scores each route segment using the trained ML model
+    3. Calculates overall safety metrics for each route
+    4. Identifies danger zones (high-risk segments)
+    5. Returns routes sorted by safety score (safest first)
+
+    ## Example Request
+
+    ```bash
+    curl -X POST "http://localhost:8000/analyze-route" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "origin": "Tempe, AZ",
+        "destination": "Sedona, AZ",
+        "departure_time": "2024-02-01T17:00:00",
+        "weather_condition": "Clear",
+        "temperature_f": 70.0,
+        "visibility_mi": 10.0
+      }'
+    ```
+    """
+)
+async def analyze_route(request: RouteAnalysisRequest) -> RouteAnalysisResponse:
+    """
+    Analyze route alternatives for accident risk.
+
+    Fetches multiple route options and scores each for safety based on:
+    - Time of day and day of week
+    - Weather conditions
+    - Road features along the route
+    - Historical accident patterns
+
+    Returns routes sorted by safety score with the safest option first.
+    """
+    logger.info(f"Route analysis request: {request.origin} -> {request.destination}")
+
+    try:
+        # Step 1: Fetch routes from Google Maps API
+        # Google rejects past departure_time values, so pass None for past times.
+        # Route geometry doesn't change — only traffic does — so we still use
+        # the original departure_time for risk scoring (hour/day_of_week patterns).
+        routing_departure = request.departure_time
+        if request.departure_time and request.departure_time < datetime.utcnow():
+            logger.info(f"Departure time {request.departure_time} is in the past, fetching routes without traffic timing")
+            routing_departure = None
+
+        try:
+            routes = get_routes(
+                origin=request.origin,
+                destination=request.destination,
+                departure_time=routing_departure
+            )
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Google Maps API not configured. Please check API key."
+            )
+        except Exception as e:
+            error_msg = str(e)
+            if "REQUEST_DENIED" in error_msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Google Maps API access denied. Please check API key and billing."
+                )
+            elif "ZERO_RESULTS" in error_msg or "NOT_FOUND" in error_msg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No routes found between '{request.origin}' and '{request.destination}'. Please check the addresses."
+                )
+            else:
+                logger.error(f"Directions API error: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to fetch routes: {error_msg}"
+                )
+
+        if not routes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No routes found between '{request.origin}' and '{request.destination}'."
+            )
+
+        logger.info(f"Fetched {len(routes)} route alternatives")
+
+        # Step 2: Score each route
+        analyzed_routes = []
+
+        for i, route in enumerate(routes, 1):
+            try:
+                # Score the route
+                risk_result = score_entire_route(
+                    waypoints=route['waypoints'],
+                    departure_time=request.departure_time,
+                    weather_condition=request.weather_condition,
+                    temperature_f=request.temperature_f,
+                    visibility_mi=request.visibility_mi
+                )
+
+                # Build danger zones list
+                danger_zones = []
+                for dz in risk_result.get('danger_zones', []):
+                    danger_zones.append(DangerZone(
+                        segment=dz['segment_index'],
+                        risk=round(dz['risk_score'], 3),
+                        location=f"({dz['lat']:.5f}, {dz['lon']:.5f})",
+                        risk_level=dz['risk_level']
+                    ))
+
+                # Create route details
+                route_details = RouteDetails(
+                    route_id=i,
+                    summary=route['summary'],
+                    distance_text=route['distance_text'],
+                    distance_meters=route['distance_meters'],
+                    duration_text=route['duration_text'],
+                    duration_seconds=route['duration_seconds'],
+                    risk_score=round(risk_result['overall_risk'], 3),
+                    risk_level=get_route_risk_level(risk_result['overall_risk']),
+                    safety_score=round(risk_result['safety_score'], 1),
+                    max_risk=round(risk_result['max_risk'], 3),
+                    min_risk=round(risk_result['min_risk'], 3),
+                    segments_analyzed=risk_result['segments_scored'],
+                    danger_zones=danger_zones,
+                    recommendation=None
+                )
+
+                analyzed_routes.append(route_details)
+
+            except Exception as e:
+                logger.error(f"Error scoring route {i}: {e}")
+                # Include route with default risk values if scoring fails
+                analyzed_routes.append(RouteDetails(
+                    route_id=i,
+                    summary=route['summary'],
+                    distance_text=route['distance_text'],
+                    distance_meters=route['distance_meters'],
+                    duration_text=route['duration_text'],
+                    duration_seconds=route['duration_seconds'],
+                    risk_score=0.5,
+                    risk_level="UNKNOWN",
+                    safety_score=50.0,
+                    max_risk=0.5,
+                    min_risk=0.5,
+                    segments_analyzed=0,
+                    danger_zones=[],
+                    recommendation="Scoring failed - use with caution"
+                ))
+
+        # Step 3: Sort routes by safety score (highest first = safest)
+        analyzed_routes.sort(key=lambda r: r.safety_score, reverse=True)
+
+        # Step 4: Mark best route as recommended
+        if analyzed_routes:
+            best_route = analyzed_routes[0]
+            if best_route.risk_level != "UNKNOWN":
+                best_route.recommendation = "Recommended - Safest option"
+
+                # Add context for other routes
+                for route in analyzed_routes[1:]:
+                    safety_diff = best_route.safety_score - route.safety_score
+                    if safety_diff > 10:
+                        route.recommendation = f"Higher risk - {safety_diff:.1f} points less safe"
+                    elif safety_diff > 5:
+                        route.recommendation = "Slightly higher risk"
+                    else:
+                        route.recommendation = "Similar safety level"
+
+        logger.info(f"Route analysis complete: {len(analyzed_routes)} routes scored")
+
+        return RouteAnalysisResponse(
+            routes=analyzed_routes,
+            total_routes=len(analyzed_routes),
+            origin=request.origin,
+            destination=request.destination,
+            weather_condition=request.weather_condition,
+            temperature_f=request.temperature_f,
+            visibility_mi=request.visibility_mi,
+            analysis_timestamp=datetime.utcnow()
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Route analysis failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Route analysis failed: {str(e)}"
+        )
 
 
 @app.get("/", include_in_schema=False)
