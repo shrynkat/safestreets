@@ -210,18 +210,27 @@ class RouteAnalysisRequest(BaseModel):
         default_factory=datetime.utcnow,
         description="Departure time in ISO format (e.g., '2024-02-01T17:00:00')"
     )
-    weather_condition: str = Field(
-        default="Clear",
-        description="Current weather condition (e.g., 'Clear', 'Rain', 'Snow', 'Fog')"
+    weather_condition: Optional[str] = Field(
+        default=None,
+        description="Weather condition override (e.g., 'Clear', 'Rain', 'Snow', 'Fog'). "
+                    "Ignored when auto_fetch_weather is True."
     )
-    temperature_f: float = Field(
-        default=70.0,
-        description="Temperature in Fahrenheit"
+    temperature_f: Optional[float] = Field(
+        default=None,
+        description="Temperature override in Fahrenheit. "
+                    "Ignored when auto_fetch_weather is True."
     )
-    visibility_mi: float = Field(
-        default=10.0,
+    visibility_mi: Optional[float] = Field(
+        default=None,
         ge=0,
-        description="Visibility in miles"
+        description="Visibility override in miles. "
+                    "Ignored when auto_fetch_weather is True."
+    )
+    auto_fetch_weather: bool = Field(
+        default=True,
+        description="If True, fetch real-time weather from OpenWeather API along the route. "
+                    "If False, use the manual weather_condition/temperature_f/visibility_mi values "
+                    "(useful for historical 'what-if' analysis)."
     )
 
     model_config = {
@@ -231,9 +240,16 @@ class RouteAnalysisRequest(BaseModel):
                     "origin": "Tempe, AZ",
                     "destination": "Sedona, AZ",
                     "departure_time": "2024-02-01T17:00:00",
-                    "weather_condition": "Clear",
-                    "temperature_f": 70.0,
-                    "visibility_mi": 10.0
+                    "auto_fetch_weather": True
+                },
+                {
+                    "origin": "Tempe, AZ",
+                    "destination": "Sedona, AZ",
+                    "departure_time": "2024-02-01T17:00:00",
+                    "auto_fetch_weather": False,
+                    "weather_condition": "Rain",
+                    "temperature_f": 55.0,
+                    "visibility_mi": 4.0
                 }
             ]
         }
@@ -304,9 +320,11 @@ class RouteAnalysisResponse(BaseModel):
     total_routes: int = Field(..., description="Total number of routes analyzed")
     origin: str = Field(..., description="Origin location")
     destination: str = Field(..., description="Destination location")
-    weather_condition: str = Field(..., description="Weather condition used for analysis")
-    temperature_f: float = Field(..., description="Temperature used for analysis")
-    visibility_mi: float = Field(..., description="Visibility used for analysis")
+    actual_weather_used: dict = Field(
+        ...,
+        description="Weather data actually used for risk scoring "
+                    "(auto-fetched or manually provided)"
+    )
     analysis_timestamp: datetime = Field(
         default_factory=datetime.utcnow,
         description="When the analysis was performed"
@@ -337,9 +355,15 @@ class RouteAnalysisResponse(BaseModel):
                     "total_routes": 1,
                     "origin": "Tempe, AZ",
                     "destination": "Sedona, AZ",
-                    "weather_condition": "Clear",
-                    "temperature_f": 70.0,
-                    "visibility_mi": 10.0,
+                    "actual_weather_used": {
+                        "source": "auto",
+                        "weather_condition": "Clear",
+                        "temperature_f": 72.3,
+                        "visibility_mi": 10.0,
+                        "humidity_pct": 28.0,
+                        "wind_speed_mph": 6.2,
+                        "description": "clear sky"
+                    },
                     "analysis_timestamp": "2024-02-01T17:00:00Z"
                 }
             ]

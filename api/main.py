@@ -46,6 +46,7 @@ from api.models import (
 # Import routing modules
 from routing.directions_api import get_routes
 from routing.risk_scorer import score_entire_route
+from routing.weather_api import get_weather_along_route
 
 # Configure logging
 logging.basicConfig(
@@ -638,7 +639,40 @@ async def analyze_route(request: RouteAnalysisRequest) -> RouteAnalysisResponse:
 
         logger.info(f"Fetched {len(routes)} route alternatives")
 
-        # Step 2: Score each route
+        # Step 2: Resolve weather conditions
+        if request.auto_fetch_weather:
+            # Auto-fetch real-time weather along the first route's path
+            logger.info("Auto-fetching weather along route")
+            weather_data = get_weather_along_route(routes[0]["waypoints"])
+            weather_condition = weather_data["weather_condition"]
+            temperature_f = weather_data["temperature_f"]
+            visibility_mi = weather_data["visibility_mi"]
+            actual_weather = {
+                "source": "auto",
+                "weather_condition": weather_condition,
+                "temperature_f": temperature_f,
+                "visibility_mi": visibility_mi,
+                "humidity_pct": weather_data["humidity_pct"],
+                "wind_speed_mph": weather_data["wind_speed_mph"],
+                "description": weather_data["description"],
+            }
+            if weather_data.get("weather_warning"):
+                actual_weather["weather_warning"] = weather_data["weather_warning"]
+            logger.info(f"Weather resolved: {weather_condition}, {temperature_f}°F")
+        else:
+            # Use manually provided values (fall back to safe defaults)
+            weather_condition = request.weather_condition or "Clear"
+            temperature_f = request.temperature_f if request.temperature_f is not None else 70.0
+            visibility_mi = request.visibility_mi if request.visibility_mi is not None else 10.0
+            actual_weather = {
+                "source": "manual",
+                "weather_condition": weather_condition,
+                "temperature_f": temperature_f,
+                "visibility_mi": visibility_mi,
+            }
+            logger.info(f"Using manual weather: {weather_condition}, {temperature_f}°F")
+
+        # Step 3: Score each route
         analyzed_routes = []
 
         for i, route in enumerate(routes, 1):
@@ -647,9 +681,9 @@ async def analyze_route(request: RouteAnalysisRequest) -> RouteAnalysisResponse:
                 risk_result = score_entire_route(
                     waypoints=route['waypoints'],
                     departure_time=request.departure_time,
-                    weather_condition=request.weather_condition,
-                    temperature_f=request.temperature_f,
-                    visibility_mi=request.visibility_mi
+                    weather_condition=weather_condition,
+                    temperature_f=temperature_f,
+                    visibility_mi=visibility_mi
                 )
 
                 # Build danger zones list
@@ -702,10 +736,10 @@ async def analyze_route(request: RouteAnalysisRequest) -> RouteAnalysisResponse:
                     recommendation="Scoring failed - use with caution"
                 ))
 
-        # Step 3: Sort routes by safety score (highest first = safest)
+        # Step 4: Sort routes by safety score (highest first = safest)
         analyzed_routes.sort(key=lambda r: r.safety_score, reverse=True)
 
-        # Step 4: Mark best route as recommended
+        # Step 5: Mark best route as recommended
         if analyzed_routes:
             best_route = analyzed_routes[0]
             if best_route.risk_level != "UNKNOWN":
@@ -728,9 +762,7 @@ async def analyze_route(request: RouteAnalysisRequest) -> RouteAnalysisResponse:
             total_routes=len(analyzed_routes),
             origin=request.origin,
             destination=request.destination,
-            weather_condition=request.weather_condition,
-            temperature_f=request.temperature_f,
-            visibility_mi=request.visibility_mi,
+            actual_weather_used=actual_weather,
             analysis_timestamp=datetime.utcnow()
         )
 
